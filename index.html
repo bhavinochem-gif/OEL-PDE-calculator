@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API OEL & PDE Calculator</title>
+    <!-- Include html2pdf.js for client-side PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; color: #2d3748; }
+        h2 { color: #2c5282; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 16px; }
+        .button-group { margin-top: 20px; }
+        button { background-color: #3182ce; color: white; padding: 12px 24px; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 16px;}
+        button:hover { background-color: #2b6cb0; }
+        .btn-pdf { background-color: #38a169; margin-left: 10px; display: none; }
+        .btn-pdf:hover { background-color: #2f855a; }
+        
+        /* UI Results */
+        .error { color: #e53e3e; font-weight: bold; padding: 15px; background-color: #fff5f5; border-left: 4px solid #e53e3e; margin-top: 20px; display: none; }
+        .result-box { background-color: #f7fafc; padding: 20px; margin-top: 30px; border-radius: 6px; border: 1px solid #e2e8f0; display: none; }
+        .pde-text { color: #38a169; font-size: 1.2em; font-weight: bold; }
+        .oel-text { color: #3182ce; font-size: 1.2em; font-weight: bold; }
+
+        /* Hidden PDF Template Styling */
+        #pdf-template { display: none; background: white; width: 800px; padding: 40px; color: #333; box-sizing: border-box; }
+        .pdf-header { background-color: #1a365d; color: #ffffff; padding: 20px 30px; margin-bottom: 20px; border-bottom: 5px solid #2b6cb0; }
+        .pdf-header h1 { margin: 0; font-size: 22pt; }
+        .pdf-header p { margin: 5px 0 0 0; font-size: 11pt; color: #e2e8f0; }
+        .pdf-section h2 { color: #2c5282; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; font-size: 14pt; margin-top: 25px; }
+        .pdf-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        .pdf-table th, .pdf-table td { padding: 10px; text-align: left; border-bottom: 1px solid #edf2f7; font-size: 11pt; }
+        .pdf-table th { background-color: #f7fafc; font-weight: bold; width: 40%; }
+        .pdf-results { display: flex; justify-content: space-between; margin-top: 15px; }
+        .pdf-box { width: 48%; padding: 20px; border-radius: 6px; box-sizing: border-box; }
+        .pdf-pde { background-color: #f0fff4; border-left: 6px solid #38a169; }
+        .pdf-oel { background-color: #ebf8ff; border-left: 6px solid #3182ce; }
+        .pdf-box-title { font-size: 10pt; color: #718096; text-transform: uppercase; font-weight: bold; margin: 0 0 10px 0; }
+        .pdf-val { font-size: 22pt; font-weight: bold; margin: 0; color: #2d3748; }
+        .pdf-unit { font-size: 12pt; font-weight: normal; color: #4a5568; }
+        .pdf-math { background-color: #fffaf0; border-left: 4px solid #ed8936; padding: 15px; margin-top: 15px; font-size: 11pt; }
+    </style>
+</head>
+<body>
+
+    <h2>Pharmacological OEL & PDE Calculator</h2>
+    
+    <form id="calcForm">
+        <div class="form-group">
+            <label>CAS Number (Optional if NOAEL provided):</label>
+            <input type="text" id="casNo" placeholder="e.g., 103-90-2" />
+        </div>
+
+        <div class="form-group">
+            <label>Manual NOAEL (mg/kg/day) (Overrides CAS lookup):</label>
+            <input type="number" id="noael" step="0.0001" placeholder="Leave blank to use internal CAS lookup" />
+        </div>
+        
+        <div class="form-group">
+            <label>Maximum Daily Dose (mg/day):</label>
+            <input type="number" id="mdd" step="0.01" placeholder="4000.0" required />
+        </div>
+
+        <div class="form-group">
+            <label>Route of Administration:</label>
+            <select id="route">
+                <option value="Oral">Oral</option>
+                <option value="IV">Intravenous (IV)</option>
+                <option value="Topical">Topical</option>
+            </select>
+        </div>
+
+        <div class="button-group">
+            <button type="button" onclick="processCalculation()">Calculate Limits</button>
+            <button type="button" id="btn-download" class="btn-pdf" onclick="downloadPDF()">Download PDF Report</button>
+        </div>
+    </form>
+
+    <div id="error-box" class="error"></div>
+    
+    <div id="result-box" class="result-box">
+        <h3 id="res-title"></h3>
+        <p><strong>Permitted Daily Exposure (PDE):</strong> <span id="res-pde" class="pde-text"></span> mg/day</p>
+        <p><strong>Occupational Exposure Limit (OEL):</strong> <span id="res-oel" class="oel-text"></span> &mu;g/m&sup3;</p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+        <h4 style="color: #4a5568;">Calculation Details</h4>
+        <p id="res-msg" style="color: #718096; line-height: 1.5;"></p>
+    </div>
+
+    <!-- Hidden Template for PDF Generation -->
+    <div id="pdf-template">
+        <div class="pdf-header">
+            <h1>OEL & PDE Calculation Report</h1>
+            <p>Toxicological Assessment & Occupational Exposure Limits</p>
+        </div>
+        
+        <div class="pdf-section">
+            <h2>1. Input Parameters</h2>
+            <table class="pdf-table">
+                <tr><th>API Name</th><td id="pdf-api-name"></td></tr>
+                <tr><th>CAS Number</th><td id="pdf-cas"></td></tr>
+                <tr><th>Maximum Daily Dose (MDD)</th><td id="pdf-mdd"></td></tr>
+                <tr><th>Route of Administration</th><td id="pdf-route"></td></tr>
+                <tr><th>Base NOAEL Value</th><td id="pdf-noael"></td></tr>
+            </table>
+        </div>
+        
+        <div class="pdf-section">
+            <h2>2. Calculated Results</h2>
+            <div class="pdf-results">
+                <div class="pdf-box pdf-pde">
+                    <p class="pdf-box-title">Permitted Daily Exposure (PDE)</p>
+                    <p class="pdf-val"><span id="pdf-pde-val"></span> <span class="pdf-unit">mg/day</span></p>
+                </div>
+                <div class="pdf-box pdf-oel">
+                    <p class="pdf-box-title">Occupational Exposure Limit (OEL)</p>
+                    <p class="pdf-val"><span id="pdf-oel-val"></span> <span class="pdf-unit">&mu;g/m&sup3;</span></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="pdf-section">
+            <h2>3. Mathematical Breakdown</h2>
+            <p style="font-size: 11pt;">The calculation adheres to EMA/ISPE guidelines incorporating standard uncertainty modifying factors.</p>
+            <div class="pdf-math">
+                <p style="margin-top: 0;"><strong>PDE = (NOAEL &times; BW) / (F1 &times; F2 &times; F3 &times; F4 &times; F5)</strong></p>
+                <p><strong>OEL = (PDE &times; 1000) / (V &times; Absorption)</strong></p>
+                <ul style="margin-bottom: 0;">
+                    <li><strong>BW (Body Weight):</strong> 50 kg</li>
+                    <li><strong>V (Breathing Volume):</strong> 10 m&sup3;</li>
+                    <li><strong>Total Applied Modifying Factor (F):</strong> <span id="pdf-f-val"></span></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Internal Mock Database
+        const database = {
+            "103-90-2": { name: "Paracetamol (Acetaminophen)", noael: 50.0 },
+            "50-78-2": { name: "Aspirin", noael: 25.0 },
+            "123-45-6": { name: "Potent-X", noael: 0.01 }
+        };
+
+        let currentResult = null;
+
+        function processCalculation() {
+            // Reset UI
+            document.getElementById('error-box').style.display = 'none';
+            document.getElementById('result-box').style.display = 'none';
+            document.getElementById('btn-download').style.display = 'none';
+
+            // Fetch Inputs
+            const casNo = document.getElementById('casNo').value.trim();
+            const manualNoael = parseFloat(document.getElementById('noael').value);
+            const mdd = parseFloat(document.getElementById('mdd').value);
+            const route = document.getElementById('route').value;
+
+            if (isNaN(mdd) || mdd <= 0) {
+                showError("Please enter a valid Maximum Daily Dose (MDD).");
+                return;
+            }
+
+            let activeNoael = 0.0;
+            let activeApiName = "";
+
+            // NOAEL Logic
+            if (!isNaN(manualNoael) && manualNoael > 0) {
+                activeNoael = manualNoael;
+                activeApiName = casNo ? `API (CAS: ${casNo})` : "Custom API (Manual NOAEL)";
+            } else {
+                if (!casNo) {
+                    showError("Please provide either a CAS Number or a Manual NOAEL.");
+                    return;
+                }
+                const apiData = database[casNo];
+                if (!apiData) {
+                    showError("Error: CAS Number not found in database and no manual NOAEL provided.");
+                    return;
+                }
+                activeNoael = apiData.noael;
+                activeApiName = apiData.name;
+            }
+
+            // Calculation Constants
+            const bw = 50.0; // kg
+            const v = 10.0;  // m3
+            const f1 = 5.0, f2 = 10.0, f4 = 1.0, f5 = 1.0;
+            const f3 = route === "IV" ? 50.0 : 10.0;
+            const totalF = f1 * f2 * f3 * f4 * f5;
+
+            // Math execution
+            const pde = (activeNoael * bw) / totalF;
+            const oel = (pde * 1000) / v;
+
+            // Store for PDF
+            currentResult = {
+                casNo: casNo || "N/A",
+                mdd: mdd.toFixed(2),
+                route: route,
+                noael: activeNoael.toFixed(4),
+                apiName: activeApiName,
+                pde: pde.toFixed(4),
+                oel: oel.toFixed(2),
+                totalF: totalF
+            };
+
+            // Populate DOM Results
+            document.getElementById('res-title').innerText = `Results for ${activeApiName}`;
+            document.getElementById('res-pde').innerText = currentResult.pde;
+            document.getElementById('res-oel').innerText = currentResult.oel;
+            document.getElementById('res-msg').innerText = `Calculation successful. Base NOAEL used: ${activeNoael} mg/kg/day. Total applied Modifying Factor (F) = ${totalF}. Standard Body Weight (50kg) and Shift Breathing Volume (10m³) applied.`;
+
+            // Display Results and Download Button
+            document.getElementById('result-box').style.display = 'block';
+            document.getElementById('btn-download').style.display = 'inline-block';
+        }
+
+        function showError(message) {
+            const errBox = document.getElementById('error-box');
+            errBox.innerText = message;
+            errBox.style.display = 'block';
+        }
+
+        function downloadPDF() {
+            if (!currentResult) return;
+
+            // Map data to hidden PDF template
+            document.getElementById('pdf-api-name').innerText = currentResult.apiName;
+            document.getElementById('pdf-cas').innerText = currentResult.casNo;
+            document.getElementById('pdf-mdd').innerText = currentResult.mdd + ' mg/day';
+            document.getElementById('pdf-route').innerText = currentResult.route;
+            document.getElementById('pdf-noael').innerText = currentResult.noael + ' mg/kg/day';
+            document.getElementById('pdf-pde-val').innerText = currentResult.pde;
+            document.getElementById('pdf-oel-val').innerText = currentResult.oel;
+            document.getElementById('pdf-f-val').innerText = currentResult.totalF;
+
+            // Briefly display template off-screen for html2pdf to capture layout
+            const element = document.getElementById('pdf-template');
+            element.style.display = 'block';
+            element.style.position = 'absolute';
+            element.style.top = '-9999px';
+
+            const opt = {
+                margin:       0.5,
+                filename:     `OEL_PDE_Report_${new Date().toISOString().slice(0,10)}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                // Re-hide template after PDF triggers download
+                element.style.display = 'none';
+                element.style.position = 'static';
+            });
+        }
+    </script>
+</body>
+</html>
